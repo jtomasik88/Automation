@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Search every document in a folder for a word or term.
+"""SuperSearch: search every document in the SuperSearch Sources folder for a word or term.
+
+Double-click this file (or run it with no arguments) and it will ask what to search for.
+By default it searches the folder in DEFAULT_FOLDER below, including subfolders,
+ignoring upper/lower case.
 
 Supported formats:
   - Plain text: .txt .md .csv .tsv .log .json .xml .html .htm .yaml .yml .ini .cfg
@@ -11,10 +15,12 @@ Supported formats:
   - PDF:         .pdf       (requires `pip install pypdf`)
 
 Examples:
-  python search_documents.py ~/Documents "invoice"
-  python search_documents.py ./reports "net profit" --ignore-case --recursive
-  python search_documents.py ./notes "colou?r" --regex
-  python search_documents.py ./contracts "term" --whole-word --ext .docx .pdf
+  python SuperSearch.py                      (asks for the search term)
+  python SuperSearch.py "invoice"
+  python SuperSearch.py "net profit" --whole-word
+  python SuperSearch.py "Invoice" --case-sensitive --ext .docx .pdf
+  python SuperSearch.py "colou?r" --regex
+  python SuperSearch.py "invoice" --folder "C:\\Some\\Other Folder"
 """
 
 import argparse
@@ -23,6 +29,9 @@ import re
 import sys
 import zipfile
 from pathlib import Path
+
+# The folder SuperSearch looks through unless --folder is given.
+DEFAULT_FOLDER = Path(r"C:\Users\jtomasik\OneDrive - BlueScope\Desktop\THE MACHINE\SuperSearch Sources")
 
 TEXT_EXTENSIONS = {
     ".txt", ".md", ".markdown", ".csv", ".tsv", ".log", ".json", ".xml",
@@ -119,29 +128,9 @@ def iter_files(folder: Path, recursive: bool, extensions: set):
             yield path
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Search every document in a folder for a word or term.",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="Examples:" + __doc__.split("Examples:", 1)[1],
-    )
-    parser.add_argument("folder", type=Path, help="folder to search")
-    parser.add_argument("term", help="word or phrase to look for")
-    parser.add_argument("-i", "--ignore-case", action="store_true", help="case-insensitive search")
-    parser.add_argument("-w", "--whole-word", action="store_true", help="match whole words only")
-    parser.add_argument("-r", "--recursive", action="store_true", help="include subfolders")
-    parser.add_argument("-e", "--regex", action="store_true", help="treat TERM as a regular expression")
-    parser.add_argument("-l", "--files-only", action="store_true", help="only list matching file names")
-    parser.add_argument("--ext", nargs="+", metavar="EXT",
-                        help="only search these extensions, e.g. --ext .docx .pdf")
-    args = parser.parse_args()
-
-    if not args.folder.is_dir():
-        print(f"Error: '{args.folder}' is not a folder.", file=sys.stderr)
-        return 2
-
+def run_search(folder: Path, term: str, args) -> int:
     try:
-        pattern = build_pattern(args.term, args.regex, args.whole_word, args.ignore_case)
+        pattern = build_pattern(term, args.regex, args.whole_word, not args.case_sensitive)
     except re.error as exc:
         print(f"Error: invalid regular expression: {exc}", file=sys.stderr)
         return 2
@@ -150,13 +139,14 @@ def main() -> int:
                   if args.ext else SUPPORTED_EXTENSIONS)
 
     files_searched = files_matched = total_matches = 0
-    for path in iter_files(args.folder, args.recursive, extensions):
-        files_searched += 1
+    for path in iter_files(folder, not args.no_subfolders, extensions):
+        name = path.relative_to(folder)
         try:
             text = extract_text(path)
         except (ExtractionError, OSError) as exc:
-            print(f"[skipped] {path}: {exc}", file=sys.stderr)
+            print(f"[skipped] {name}: {exc}", file=sys.stderr)
             continue
+        files_searched += 1
 
         hits = [(n, line.strip()) for n, line in enumerate(text.splitlines(), 1)
                 if pattern.search(line)]
@@ -167,16 +157,61 @@ def main() -> int:
         files_matched += 1
         total_matches += count
         if args.files_only:
-            print(path)
+            print(name)
             continue
-        print(f"\n{path}  ({count} match{'es' if count != 1 else ''})")
+        print(f"\n{name}  ({count} match{'es' if count != 1 else ''})")
         for n, line in hits:
             snippet = line if len(line) <= 200 else line[:197] + "..."
             print(f"  line {n}: {snippet}")
 
-    print(f"\nSearched {files_searched} file(s): '{args.term}' found {total_matches} time(s) "
+    print(f"\nSearched {files_searched} file(s): '{term}' found {total_matches} time(s) "
           f"in {files_matched} file(s).")
     return 0 if files_matched else 1
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Search every document in the SuperSearch Sources folder for a word or term.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="Examples:" + __doc__.split("Examples:", 1)[1],
+    )
+    parser.add_argument("term", nargs="?",
+                        help="word or phrase to look for (leave out to be asked)")
+    parser.add_argument("-f", "--folder", type=Path, default=DEFAULT_FOLDER,
+                        help="folder to search (default: SuperSearch Sources)")
+    parser.add_argument("-c", "--case-sensitive", action="store_true",
+                        help="match upper/lower case exactly")
+    parser.add_argument("-w", "--whole-word", action="store_true", help="match whole words only")
+    parser.add_argument("-n", "--no-subfolders", action="store_true",
+                        help="only search the top folder, not its subfolders")
+    parser.add_argument("-e", "--regex", action="store_true", help="treat TERM as a regular expression")
+    parser.add_argument("-l", "--files-only", action="store_true", help="only list matching file names")
+    parser.add_argument("--ext", nargs="+", metavar="EXT",
+                        help="only search these extensions, e.g. --ext .docx .pdf")
+    args = parser.parse_args()
+
+    folder = args.folder.expanduser()
+    interactive = args.term is None
+    if not folder.is_dir():
+        print(f"Error: '{folder}' is not a folder.", file=sys.stderr)
+        if interactive:
+            input("\nPress Enter to close...")
+        return 2
+
+    if not interactive:
+        return run_search(folder, args.term, args)
+
+    # No term given (e.g. the file was double-clicked): keep asking until a blank entry.
+    print(f"SuperSearch - searching: {folder}")
+    while True:
+        try:
+            term = input("\nSearch for (press Enter on a blank line to quit): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return 0
+        if not term:
+            return 0
+        run_search(folder, term, args)
 
 
 if __name__ == "__main__":
