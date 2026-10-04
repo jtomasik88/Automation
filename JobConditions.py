@@ -6,27 +6,15 @@ Double-click this file. A window opens with one row per item:
   - Type: what you type in (each box also has a drop-down of common choices)
 Click "Create Spreadsheet", pick where to save, and the .xlsx is built for you.
 
-Requires openpyxl:  py -m pip install openpyxl
+Uses only the Python standard library -- nothing extra to install.
 """
 
 import os
-import sys
 import tkinter as tk
+import zipfile
 from pathlib import Path
+from xml.sax.saxutils import escape
 from tkinter import filedialog, messagebox, ttk
-
-try:
-    from openpyxl import Workbook
-    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-except ImportError:
-    root = tk.Tk()
-    root.withdraw()
-    messagebox.showerror(
-        "Missing package",
-        "This script needs the openpyxl package.\n\n"
-        "Open Command Prompt and run:\n\n    py -m pip install openpyxl",
-    )
-    sys.exit(1)
 
 TITLE = "Job Conditions and Modifiers"
 HEADERS = ("Item", "Type")
@@ -71,37 +59,74 @@ def as_cell_value(item, text):
     return text or None
 
 
-def build_workbook(rows):
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Job Conditions"
+def _cell(ref, value, style):
+    if value is None:
+        return f'<c r="{ref}" s="{style}"/>'
+    if isinstance(value, int):
+        return f'<c r="{ref}" s="{style}"><v>{value}</v></c>'
+    return f'<c r="{ref}" s="{style}" t="inlineStr"><is><t xml:space="preserve">{escape(value)}</t></is></c>'
 
-    thin = Side(style="thin", color="BFBFBF")
-    border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
-    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(HEADERS))
-    title = ws.cell(row=1, column=1, value=TITLE)
-    title.font = Font(size=14)
-    title.alignment = Alignment(horizontal="center", vertical="center")
-    for col in range(1, len(HEADERS) + 1):
-        cell = ws.cell(row=1, column=col)
-        cell.fill = PatternFill("solid", fgColor="00B0F0")
-        cell.border = border
-    ws.row_dimensions[1].height = 22
+# Cell styles (index into cellXfs below): 0 default, 1 title, 2 header, 3 bordered body
+STYLES_XML = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<fonts count="3"><font><sz val="11"/><name val="Aptos Narrow"/></font><font><sz val="14"/><name val="Aptos Narrow"/></font><font><b/><sz val="11"/><name val="Aptos Narrow"/></font></fonts>
+<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF00B0F0"/></patternFill></fill></fills>
+<borders count="2"><border/><border><left style="thin"><color rgb="FFBFBFBF"/></left><right style="thin"><color rgb="FFBFBFBF"/></right><top style="thin"><color rgb="FFBFBFBF"/></top><bottom style="thin"><color rgb="FFBFBFBF"/></bottom></border></borders>
+<cellStyleXfs count="1"><xf/></cellStyleXfs>
+<cellXfs count="4"><xf/><xf fontId="1" fillId="2" borderId="1" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf><xf fontId="2" borderId="1" applyFont="1" applyBorder="1"/><xf borderId="1" applyBorder="1"/></cellXfs>
+<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+</styleSheet>"""
 
-    for col, header in enumerate(HEADERS, start=1):
-        cell = ws.cell(row=2, column=col, value=header)
-        cell.font = Font(bold=True)
-        cell.border = border
+STATIC_PARTS = {
+    "[Content_Types].xml": """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+</Types>""",
+    "_rels/.rels": """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>""",
+    "xl/workbook.xml": """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheets><sheet name="Job Conditions" sheetId="1" r:id="rId1"/></sheets>
+</workbook>""",
+    "xl/_rels/workbook.xml.rels": """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>""",
+    "xl/styles.xml": STYLES_XML,
+}
 
+
+def write_xlsx(path, rows):
+    """Write the Job Conditions sheet (title bar, headers, one row per item) to an .xlsx file."""
+    sheet_rows = [
+        f'<row r="1" ht="22" customHeight="1">{_cell("A1", TITLE, 1)}{_cell("B1", None, 1)}</row>',
+        f'<row r="2">{_cell("A2", HEADERS[0], 2)}{_cell("B2", HEADERS[1], 2)}</row>',
+    ]
     for r, (item, type_) in enumerate(rows, start=3):
-        for col, value in enumerate((item, as_cell_value(item, type_)), start=1):
-            cell = ws.cell(row=r, column=col, value=value)
-            cell.border = border
+        sheet_rows.append(f'<row r="{r}">{_cell(f"A{r}", item, 3)}{_cell(f"B{r}", as_cell_value(item, type_), 3)}</row>')
 
-    ws.column_dimensions["A"].width = 20
-    ws.column_dimensions["B"].width = max(40, *(len(t) + 2 for _, t in rows))
-    return wb
+    type_width = max(40, *(len(t) + 2 for _, t in rows))
+    sheet_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        f'<cols><col min="1" max="1" width="20" customWidth="1"/><col min="2" max="2" width="{type_width}" customWidth="1"/></cols>'
+        f'<sheetData>{"".join(sheet_rows)}</sheetData>'
+        '<mergeCells count="1"><mergeCell ref="A1:B1"/></mergeCells>'
+        "</worksheet>"
+    )
+
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name, data in STATIC_PARTS.items():
+            zf.writestr(name, data)
+        zf.writestr("xl/worksheets/sheet1.xml", sheet_xml)
 
 
 class JobConditionsForm:
@@ -158,7 +183,7 @@ class JobConditionsForm:
             return
 
         try:
-            build_workbook(rows).save(path)
+            write_xlsx(path, rows)
         except PermissionError:
             messagebox.showerror(
                 TITLE, f"Couldn't save:\n{path}\n\nIf the file is open in Excel, close it and try again."

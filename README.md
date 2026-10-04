@@ -45,4 +45,5 @@ Click **Create Spreadsheet**, choose where to save, and it builds a formatted `.
 same layout: a blue "Job Conditions and Modifiers" title bar, then `Item | Type` headers.
 Gage values are saved as numbers.
 
-Needs one package: `py -m pip install openpyxl`
+Nothing extra to install: it only uses what comes with Python. If double-clicking does nothing,
+install Python from https://www.python.org/downloads/ and tick **"Add python.exe to PATH"** in the installer.
