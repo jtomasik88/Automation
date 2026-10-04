@@ -38,11 +38,11 @@ and PDF. Everything works with the standard library except PDF, which needs `py 
 ## JobConditions.py
 
 Opens a pop-up form for the **Job Conditions and Modifiers** (Shape, Width, Length, Eave Height,
-... Downspout C). Type each value in the **Type** box (most boxes also have a drop-down of common
-choices); the **Source** column is pre-filled (Detailing Packet / OCF / OCF & DP) and can be changed.
+... Downspout Color). Type each value in the **Type** box (most boxes also have a drop-down of
+common choices).
 
 Click **Create Spreadsheet**, choose where to save, and it builds a formatted `.xlsx` with the
-same layout: a blue "Job Conditions and Modifiers" title bar, then `Item | Type | Source` headers.
+same layout: a blue "Job Conditions and Modifiers" title bar, then `Item | Type` headers.
 Gage values are saved as numbers.
 
 Needs one package: `py -m pip install openpyxl`
