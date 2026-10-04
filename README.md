@@ -34,3 +34,15 @@ To change the folder permanently, edit the `DEFAULT_FOLDER` line near the top of
 Supported formats: plain text and code files (`.txt`, `.md`, `.csv`, `.json`, `.html`, ...),
 Word (`.docx`), Excel (`.xlsx`), PowerPoint (`.pptx`), OpenDocument (`.odt`, `.ods`, `.odp`)
 and PDF. Everything works with the standard library except PDF, which needs `py -m pip install pypdf`.
+
+## JobConditions.py
+
+Opens a pop-up form for the **Job Conditions and Modifiers** (Shape, Width, Length, Eave Height,
+... Downspout C). Type each value in the **Type** box (most boxes also have a drop-down of common
+choices); the **Source** column is pre-filled (Detailing Packet / OCF / OCF & DP) and can be changed.
+
+Click **Create Spreadsheet**, choose where to save, and it builds a formatted `.xlsx` with the
+same layout: a blue "Job Conditions and Modifiers" title bar, then `Item | Type | Source` headers.
+Gage values are saved as numbers.
+
+Needs one package: `py -m pip install openpyxl`
